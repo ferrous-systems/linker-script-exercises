@@ -6,6 +6,7 @@ use nrf52840_hal as _; // interrupt handlers
 use panic_probe as _;  // panic handler
 
 static VARIABLE: u32 = 0;
+// static VARIABLE: &str = "hello";
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
