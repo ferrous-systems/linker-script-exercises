@@ -34,11 +34,11 @@ Things to check
 - Compare this output to `memory.x`
   - `memory.x` is provided by the HAL and placed in `target` directory
   - e.g. `target/thumbv7em-none-eabihf/debug/build/nrf52840-hal-cf89422e8bc97512/out/memory.x`
-  - check the `MEMORY` command in the linker script
+  - check the `MEMORY` section in the linker script
 
 Questions to answer:
-- what are the memory regions specified in the `memory.x` linker script? 
-- which sections from the `size` output goes into which memory region?
+- what are the memory regions specified in the `memory.x` linker script?
+- which sections from the `size` output go into which memory region?
 
 ## `nm`, symbols
 
@@ -57,7 +57,7 @@ $ cargo nm -- --demangle --numeric-sort
 Questions to answer:
 - in which sections are the above symbols (functions / static variables) located?
 
-add this to `main`
+add this to `main` and `cargo run` the program
 
 ``` rust
 let array = [0u8; 16];
@@ -65,7 +65,7 @@ let address = array.as_ptr();
 defmt::info!("addrof(array) = {}", address1);
 ```
 
-- how is this address related to `_stack_start`?
+- how is the printed address related to `_stack_start`?
 - try creating more stack variables OR
   - try doing some function calls and printing the address of stack variables allocated there
 
@@ -80,28 +80,14 @@ Hex dump of section '.vector_table':
 
 Questions to answer:
 - how do the first 2 32-bit words relate to the symbols output from before?
-  - NOTE due to endianness the 32-bit word is printed reversed
+  - NOTE due to endianness the 32-bit word is printed in reverse
 
-## inspect `link.x`
-
-- goal: why does each section goes into RAM or FLASH?
-- each section has to be assigned to a memory region
-  - that is done in `link.x`
-  - memory regions are defined in `memory.x`
-  - `link.x` is provided by `cortex-m-rt`
-
-``` text
-SECTIONS {
-  .section_name start_address {
-    /* .. */
-  } > MEMORY_REGION
-}
-```
-
-- Questions to answer
-  - the locations of linker sections, do they make sense? do they go into the 'linker section to memory region' mapping specified in `link.x`?
 
 ## location of static variables
+
+### integer
+
+starter code:
 
 ``` rust
 static VARIABLE: u32 = 0;
@@ -111,25 +97,32 @@ static VARIABLE: u32 = 0;
 - run `cargo nm`
 
 ``` console
-$ cargo nm -- --demangle --numeric-sort 
+$ cargo nm -- --demangle --numeric-sort
 ```
 
 - is `VARIABLE` in `FLASH` or `RAM`?
-- does address reported by `nm` match the address reported by the program?
-- in which linker section is the variable located?
+- does the address reported by `nm` match the address reported by the program?
+- in which linker section is the variable located? (check `size` output)
+
+### string
 
 - change `VARIABLE` to be a `&str`
 
-- look for variable (by address) in `nm`; use address from program's output
+- look for variable (by address) in `nm`
+  - you may not find by name, search for the address reported in the program's output
+
+- run
 
 ``` console
 $ cargo nm -- --demangle --numeric-sort --print-size
 ```
 
-- second column is symbol size. does it match the string size?
+- second column is symbol size. how is this number related to the string size?
 - in which linker section is the variable located?
 
-try these variants
+### atomic variable
+
+try these variants of `VARIABLE`
 ``` rust
 //static VARIABLE: AtomicU32 = AtomicU32::new(0);
 //static VARIABLE: AtomicU32 = AtomicU32::new(1);
@@ -144,21 +137,24 @@ $ cargo nm -- --demangle --numeric-sort --print-size
 
 ## override `memory.x`
 
-1. change LENGTH
+### LENGTH
+
 - copy `memory.x` from `target` directory into the root of repo
-    - linker search for linker script in current directory and *then* in linker search path
+  - linker search for linker script in the current directory (higher precedence) and *then* in linker search path
 
 - change LENGTH of `RAM` in `memory.x`
-- then modify `main.rs` to force a relinking
+- then *modify* `main.rs` to force relinking on `cargo build`
 
 - run `cargo nm`. look for `_stack_start`
 
-2. change ORIGIN
-- try to modify ORIGIN OF `RAM`
-  - expected change: address of .bss and .data would change
+### ORIGIN
 
-3. delete RAM region
-- try changing `RAM` to `RAM2`
+- try to modify the `ORIGIN` OF `RAM`
+- run `size`; did the location of any section change?
+
+### no RAM
+
+- try renaming `RAM` to `CCRAM`
 - what happens after `cargo build`?
 
 ## use `flip-link`
@@ -169,20 +165,21 @@ $ cargo nm -- --demangle --numeric-sort --print-size
   - where are the static variables located (.bss & .data)?
 
 - modify `.cargo/config.toml`. add this inside `rustflags` array
+
 ``` toml
   "-C", "linker=flip-link",
 ```
 
-- do `cargo build`
+- do `cargo build` again
 - answer these questions
   - where is the stack located?
   - where are the static variables located (.bss & .data)?
 
-- TODO link to flip-link README here
+`flip-link` docs: https://github.com/knurling-rs/flip-link#flip-link
 
 ## `#[link_section]` attribute
 
-- **NOTE** `link_section` is **UNSAFE**
+- **NOTE** `link_section` is *unsafe*
 
 - try this
 
@@ -197,17 +194,17 @@ defmt::info!("addrof(VARIABLE) = {}", address);
 - look at `nm` and `size`. in which linker section is `VARIABLE` placed?
 - uncomment `link_section` and try again
 
-- use case: initial chunk of memory for allocator (`#[global_allocator]`) or memory pool (see `heapless::Pool`)
-  - why? avoid initializing that chunk of memory on startup = faster start up times
+- use case: initial chunk of memory for an allocator (`#[global_allocator]`) or a memory pool (see `heapless::Pool`)
+  - why leave memory uninitialized? avoid initializing that chunk of memory on startup = faster start up times
 
 ## overriding symbols: change location of the stack
 
-- override `memory.x`
+- override `memory.x` (copy it from `target` into the working directory)
 - uncomment `_stack_start` line
-- set the value to 
+- set the value to
 
 ``` text
-_stack_start = ORIGIN(RAM) + LENGTH(RAM) / 2; 
+_stack_start = ORIGIN(RAM) + LENGTH(RAM) / 2;
 ```
 
 - run `cargo nm` and verify that `_stack_start` changed
@@ -216,21 +213,21 @@ use case
 - place the stack on a different memory region
   - so that when stack overflows it doesn't overwrite static variables (`flip-link` also prevents that)
 
-## order of linker sections
+## inspect `link.x`
 
-- start address of linker section in defined in `link.x` after linker section name
+- each section has to be assigned to a memory region
+  - that is done in `link.x`
+  - memory regions are defined in `memory.x`
+  - `link.x` is provided by `cortex-m-rt`
+    - it can be found in the `target` directory
 
-```
+syntax for placing a linker section into a memory region
+``` text
+SECTIONS {
   .section_name start_address {
     /* .. */
   } > MEMORY_REGION
+}
 ```
 
-- in `link.x`, start address of `.text` is set to end address of `.vector_table` (line 83, cortex-m-rt v0.6.14)
-
-try:
-- override the `_stext` symbol to change the location of the `.text` section
-- check the start address of each linker section in `link.x`
-
-questions to answer:
-- how are start addresses related to the order of the linker sections in the output of `size` 
+- from previous exercises, is the linker script specification being respected?

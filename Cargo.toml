@@ -1,5 +1,4 @@
 [package]
-authors = ["Ferrous Systems"]
 edition = "2018"
 readme = "README.md"
 name = "app"
